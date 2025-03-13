@@ -445,7 +445,7 @@ async function summarizeChapter(genre, chapterNum, chapterContent, outputDir) {
 
 // Function to expand and enhance a chapter
 async function enhanceChapter(genre, chapterNum, originalChapter, chapterSummaries, bookOutline, outputDir) {
-  console.log(`Enhancing Chapter ${chapterNum} with additional content and details...`);
+  console.log(`Enhancing Chapter ${chapterNum}...`);
   
   // Create context for enhancement, including the chapter summaries to maintain continuity
   let summaryText = '';
@@ -494,17 +494,45 @@ async function enhanceChapter(genre, chapterNum, originalChapter, chapterSummari
     }
   ];
   
-  const response = await callGroq(prompt);
+  const enhancedContent = await callGroq(prompt);
   
-  // Save the enhanced chapter
-  const enhancedChapterPath = `${outputDir}/chapters/chapter_${chapterNum}_enhanced.txt`;
-  await fs.writeFile(enhancedChapterPath, response);
+  // Function to count words in a text
+  const countWords = text => text.trim().split(/\s+/).length;
   
-  // Update the original chapter file with the enhanced version
-  await fs.writeFile(`${outputDir}/chapters/chapter_${chapterNum}.txt`, response);
+  // Get word counts
+  const originalWordCount = countWords(originalChapter);
+  const enhancedWordCount = countWords(enhancedContent);
   
-  console.log(`Enhanced Chapter ${chapterNum} and saved to ${enhancedChapterPath}`);
-  return response;
+  // Calculate the growth ratio
+  const growthRatio = enhancedWordCount / originalWordCount;
+  
+  // Only save if the enhanced version is substantially longer (at least 20% longer)
+  if (growthRatio >= 1.2) {
+    console.log(`Chapter ${chapterNum} enhanced successfully:`);
+    console.log(`- Original word count: ${originalWordCount}`);
+    console.log(`- Enhanced word count: ${enhancedWordCount}`);
+    console.log(`- Growth ratio: ${(growthRatio * 100).toFixed(1)}%`);
+    
+    // Save directly to the original chapter file
+    const chapterPath = path.join(outputDir, 'chapters', `chapter_${chapterNum}.txt`);
+    await fs.writeFile(chapterPath, enhancedContent);
+    
+    // Also create a backup of the original just in case
+    const backupDir = path.join(outputDir, 'backups');
+    await fs.mkdir(backupDir, { recursive: true });
+    const backupPath = path.join(backupDir, `chapter_${chapterNum}_original.txt`);
+    await fs.writeFile(backupPath, originalChapter);
+    
+    return enhancedContent;
+  } else {
+    console.log(`Chapter ${chapterNum} enhancement skipped:`);
+    console.log(`- Original word count: ${originalWordCount}`);
+    console.log(`- Enhanced word count: ${enhancedWordCount}`);
+    console.log(`- Growth ratio: ${(growthRatio * 100).toFixed(1)}%`);
+    console.log('Enhanced version not substantially longer than original - keeping original version');
+    
+    return originalChapter;
+  }
 }
 
 // Function to create a formatted PDF from the book content
@@ -867,6 +895,99 @@ async function main() {
       
       // Generate PDF
       await createBookPDF(bookInfo.title, bookInfo.genre, chapters, bookDir);
+      return;
+    }
+    
+    // Handle enhance command
+    if (args[0] === '--enhance') {
+      const bookTitle = args[1];
+      if (!bookTitle) {
+        console.error('Please provide a book title for enhancement');
+        process.exit(1);
+      }
+      
+      const bookDir = `./output/${bookTitle}`;
+      if (!await directoryExists(bookDir)) {
+        console.error(`Book directory not found: ${bookDir}`);
+        process.exit(1);
+      }
+      
+      // Get book info
+      const bookInfo = await getBookInfoFromDirectory(bookDir);
+      
+      // Get chapter files
+      const chaptersDir = path.join(bookDir, 'chapters');
+      const chapterFiles = await findChapterFiles(chaptersDir);
+      
+      if (chapterFiles.length === 0) {
+        console.error('No chapter files found');
+        process.exit(1);
+      }
+      
+      // Parse chapter range if provided
+      let startChapter = 1;
+      let endChapter = chapterFiles.length;
+      
+      if (args[2] && args[3]) {
+        startChapter = parseInt(args[2]);
+        endChapter = parseInt(args[3]);
+        
+        if (isNaN(startChapter) || isNaN(endChapter) || 
+            startChapter < 1 || endChapter > chapterFiles.length ||
+            startChapter > endChapter) {
+          console.error(`Invalid chapter range. Please specify numbers between 1 and ${chapterFiles.length}`);
+          process.exit(1);
+        }
+      }
+      
+      console.log(`Enhancing chapters ${startChapter} to ${endChapter}...`);
+      
+      // Initialize Groq here, only when we know we need it
+      initGroq();
+      
+      // Get all chapter summaries for context
+      const summaries = [];
+      for (let i = 0; i < startChapter - 1; i++) {
+        const summaryPath = path.join(bookDir, 'summaries', `chapter_${i + 1}_summary.txt`);
+        if (await fileExists(summaryPath)) {
+          const summary = await fs.readFile(summaryPath, 'utf8');
+          summaries.push(summary);
+        }
+      }
+      
+      // Process each chapter in range
+      for (let i = startChapter - 1; i < endChapter; i++) {
+        const chapterNum = i + 1;
+        console.log(`\nEnhancing Chapter ${chapterNum}...`);
+        
+        const chapterPath = path.join(chaptersDir, chapterFiles[i]);
+        const chapterContent = await fs.readFile(chapterPath, 'utf8');
+        
+        try {
+          const enhancedContent = await enhanceChapter(
+            bookInfo.genre,
+            chapterNum,
+            chapterContent,
+            summaries,
+            bookInfo.outline,
+            bookDir
+          );
+          
+          // Add this chapter's summary to the context for next chapters
+          const summaryPath = path.join(bookDir, 'summaries', `chapter_${chapterNum}_summary.txt`);
+          if (await fileExists(summaryPath)) {
+            const summary = await fs.readFile(summaryPath, 'utf8');
+            summaries.push(summary);
+          }
+          
+          console.log(`Successfully enhanced Chapter ${chapterNum}`);
+        } catch (error) {
+          console.error(`Error enhancing Chapter ${chapterNum}:`, error);
+          // Continue with next chapter even if one fails
+        }
+      }
+      
+      console.log('\nEnhancement complete!');
       return;
     }
     
