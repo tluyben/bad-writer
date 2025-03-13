@@ -13,6 +13,7 @@ This project automates the creation of full-length books in various genres using
 - 📑 **PDF Generation**: Creates a properly formatted book ready for reading
 - 🛡️ **Error Handling**: Robust retry logic and recovery systems
 - 📁 **Organized Output**: Each book gets its own directory with all materials
+- 🔁 **Continuation Support**: Resume interrupted work or run specific steps independently
 
 ## 🛠️ Installation
 
@@ -28,7 +29,8 @@ This project automates the creation of full-length books in various genres using
 
 ## 🚀 Usage
 
-Basic usage:
+### Basic Book Generation
+
 ```bash
 node main.js <genre> [topic] [chapterCount] [--no-enhance]
 ```
@@ -46,6 +48,36 @@ node main.js horror "haunted lighthouse" 15
 
 # Generate a thriller book without the enhancement phase
 node main.js thriller "cold case mystery" --no-enhance
+```
+
+### Continuation Commands
+
+Resume interrupted generation or run specific steps for existing books:
+
+```bash
+# Generate PDF from existing chapters
+node main.js --pdf <book-title>
+
+# Enhance specific chapters (or all if no range specified)
+node main.js --enhance <book-title> [start-chapter] [end-chapter]
+
+# Generate additional chapters for an existing book
+node main.js --generate-chapters <book-title> [start-chapter] [end-chapter]
+
+# Display help information
+node main.js --help
+```
+
+Examples:
+```bash
+# Create PDF for "the_void_within" from existing chapters
+node main.js --pdf the_void_within
+
+# Enhance only chapters 3-5 of "the_void_within"
+node main.js --enhance the_void_within 3 5
+
+# Add chapters 16-20 to the existing book "the_void_within"
+node main.js --generate-chapters the_void_within 16 20
 ```
 
 ## 📋 Process Steps
@@ -96,6 +128,7 @@ The script uses the following default settings:
 - Custom topics provide more focused books than auto-generated concepts
 - Specifying chapter counts gives you more control over the book length
 - Each book takes 1-3 hours to generate, depending on chapter count and length
+- If generation is interrupted, use continuation commands to resume where you left off
 
 ## ⚠️ Limitations
 
@@ -103,6 +136,13 @@ The script uses the following default settings:
 - Very specific genre combinations may need additional prompt engineering
 - Token limits may require compression for extremely long or complex books
 - API outages can interrupt the generation process (though the script has retry logic)
+
+## 💡 Workflow Tips
+
+- For longer books, consider generating chapters in batches using the `--generate-chapters` command
+- If API rate limits are reached, wait and then continue with `--generate-chapters` from the last completed chapter
+- The `--enhance` command can be run separately after all chapters are generated
+- For quick previews, use `--pdf` to compile chapters without waiting for the enhancement phase
 
 ## 🤝 Contributing
 
@@ -112,6 +152,7 @@ Contributions are welcome! Areas for improvement:
 - Word count target controls
 - Cover image generation
 - EPUB/MOBI conversion
+- Multi-model support for different LLMs
 
 ## 📜 License
 

@@ -3,13 +3,39 @@ const fs = require('fs').promises;
 const path = require('path');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
-// Initialize Groq client
-const groq = new Groq();
+// Initialize Groq client only when needed
+let groq;
+function initGroq() {
+  if (!groq) {
+    groq = new Groq();
+  }
+  return groq;
+}
 
 // Configuration for token management
 const MAX_CONTEXT_TOKENS = 128000; // 128K context window
 const TOKEN_BUFFER = 10000; // Safety buffer to prevent overflows
 const ESTIMATED_TOKENS_PER_CHAR = 0.25; // Approximate token/character ratio
+
+// Function to check if directory exists
+async function directoryExists(dirPath) {
+  try {
+    const stats = await fs.stat(dirPath);
+    return stats.isDirectory();
+  } catch (error) {
+    return false;
+  }
+}
+
+// Function to check if file exists
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
 
 // Create output directories if they don't exist
 async function initializeDirectories(bookTitle) {
@@ -483,159 +509,155 @@ async function enhanceChapter(genre, chapterNum, originalChapter, chapterSummari
 
 // Function to create a formatted PDF from the book content
 async function createBookPDF(title, genre, chapters, outputDir) {
-  console.log("Creating formatted PDF...");
-  
-  // Create a new PDF document
-  const pdfDoc = await PDFDocument.create();
-  
-  // Embed the font
-  const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
-  
-  // Add title page
-  const titlePage = pdfDoc.addPage([612, 792]); // US Letter size
-  const { width, height } = titlePage.getSize();
-  
-  // Add title
-  titlePage.drawText(title, {
-    x: 50,
-    y: height - 200,
-    size: 40,
-    font: boldFont,
-    color: rgb(0, 0, 0),
-  });
-  
-  // Add genre
-  titlePage.drawText(`A ${genre} Novel`, {
-    x: 50,
-    y: height - 250,
-    size: 20,
-    font: font,
-    color: rgb(0, 0, 0),
-  });
-  
-  // Add generated date
-  const date = new Date().toLocaleDateString();
-  titlePage.drawText(`Generated on ${date}`, {
-    x: 50,
-    y: 50,
-    size: 12,
-    font: font,
-    color: rgb(0, 0, 0),
-  });
-  
-  // Add each chapter
-  for (const [index, chapterContent] of chapters.entries()) {
-    // Extract chapter title if present
-    let chapterTitle = `Chapter ${index + 1}`;
-    const titleMatch = chapterContent.match(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n*]+)(?:\*\*)?/i);
-    if (titleMatch && titleMatch[1]) {
-      chapterTitle = `Chapter ${index + 1}: ${titleMatch[1].trim()}`;
-    }
+  console.log("Starting PDF creation process...");
+  console.log(`Title: ${title}`);
+  console.log(`Genre: ${genre}`);
+  console.log(`Number of chapters: ${chapters.length}`);
+  console.log(`Output directory: ${outputDir}`);
+
+  try {
+    // Create a new PDF document
+    console.log("Creating new PDF document...");
+    const pdfDoc = await PDFDocument.create();
     
-    // Clean chapter content - remove markdown-style chapter headings
-    let cleanedContent = chapterContent.replace(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n]+)(?:\*\*)?/i, '');
+    // Embed the font
+    console.log("Embedding fonts...");
+    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
     
-    // Split chapter text into lines that fit the page width
-    const lines = [];
-    const words = cleanedContent.split(/\s+/);
-    let currentLine = '';
+    // Add title page
+    console.log("Adding title page...");
+    const titlePage = pdfDoc.addPage([612, 792]); // US Letter size
+    const { width, height } = titlePage.getSize();
     
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const textWidth = font.widthOfTextAtSize(testLine, 12);
-      
-      if (textWidth < width - 100) {
-        currentLine = testLine;
-      } else {
-        lines.push(currentLine);
-        currentLine = word;
-      }
-    }
-    if (currentLine) lines.push(currentLine);
-    
-    // Add chapter page
-    const chapterPage = pdfDoc.addPage([612, 792]);
-    let y = height - 150; // Start lower to leave room for chapter title
-    const lineHeight = 15;
-    
-    // Draw chapter title centered
-    chapterPage.drawText(chapterTitle, {
-      x: (width - boldFont.widthOfTextAtSize(chapterTitle, 24)) / 2,
-      y: height - 100,
-      size: 24,
+    // Add title
+    titlePage.drawText(title, {
+      x: (width - boldFont.widthOfTextAtSize(title, 40)) / 2, // Center the title
+      y: height - 200,
+      size: 40,
       font: boldFont,
       color: rgb(0, 0, 0),
     });
     
-    // Track page number for this chapter
-    let currentPage = chapterPage;
+    // Add genre
+    const genreText = `A ${genre} Novel`;
+    titlePage.drawText(genreText, {
+      x: (width - font.widthOfTextAtSize(genreText, 20)) / 2, // Center the genre
+      y: height - 250,
+      size: 20,
+      font: font,
+      color: rgb(0, 0, 0),
+    });
     
-    // Add paragraph text
-    for (const line of lines) {
-      if (y < 50) {
-        currentPage = pdfDoc.addPage([612, 792]);
-        y = height - 50;
+    // Add generated date
+    const date = new Date().toLocaleDateString();
+    titlePage.drawText(`Generated on ${date}`, {
+      x: 50,
+      y: 50,
+      size: 12,
+      font: font,
+      color: rgb(0, 0, 0),
+    });
+    
+    // Add each chapter
+    for (const [index, chapterContent] of chapters.entries()) {
+      // Extract chapter title if present
+      let chapterTitle = `Chapter ${index + 1}`;
+      const titleMatch = chapterContent.match(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n*]+)(?:\*\*)?/i);
+      if (titleMatch && titleMatch[1]) {
+        chapterTitle = `Chapter ${index + 1}: ${titleMatch[1].trim()}`;
       }
       
-      if (line.trim() === '') {
-        // Add extra space for paragraph breaks
-        y -= lineHeight;
-        continue;
-      }
+      // Clean chapter content - remove markdown-style chapter headings
+      let cleanedContent = chapterContent
+        .replace(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n]+)(?:\*\*)?/i, '')
+        .trim();
       
-      // Check for emphasized text with ** or *
-      if (line.includes('**') || line.includes('*')) {
-        // Handle text with emphasis marks
-        let xPos = 50;
-        const segments = line.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+      // Split content into paragraphs, preserving intentional line breaks
+      const paragraphs = cleanedContent
+        .split(/\n\s*\n/) // Split on blank lines
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+      
+      // Add chapter page
+      const chapterPage = pdfDoc.addPage([612, 792]);
+      let y = height - 150; // Start lower to leave room for chapter title
+      const lineHeight = 15;
+      const paragraphSpacing = lineHeight * 1.5; // Space between paragraphs
+      const margins = { left: 72, right: 72 }; // 1-inch margins
+      const textWidth = width - margins.left - margins.right;
+      
+      // Draw chapter title centered
+      const titleWidth = boldFont.widthOfTextAtSize(chapterTitle, 24);
+      chapterPage.drawText(chapterTitle, {
+        x: (width - titleWidth) / 2,
+        y: height - 100,
+        size: 24,
+        font: boldFont,
+        color: rgb(0, 0, 0),
+      });
+      
+      // Track current page
+      let currentPage = chapterPage;
+      
+      // Process each paragraph
+      for (const paragraph of paragraphs) {
+        // Split paragraph into words
+        const words = paragraph.split(/\s+/);
+        let currentLine = '';
+        const lines = [];
         
-        for (const segment of segments) {
-          let segmentFont = font;
-          let cleanSegment = segment;
+        // Form lines that fit within margins
+        for (const word of words) {
+          const testLine = currentLine ? `${currentLine} ${word}` : word;
+          const textWidth = font.widthOfTextAtSize(testLine, 12);
           
-          if (segment.startsWith('**') && segment.endsWith('**')) {
-            segmentFont = boldFont;
-            cleanSegment = segment.substring(2, segment.length - 2);
-          } else if (segment.startsWith('*') && segment.endsWith('*')) {
-            segmentFont = italicFont;
-            cleanSegment = segment.substring(1, segment.length - 1);
-          }
-          
-          if (cleanSegment.length > 0) {
-            currentPage.drawText(cleanSegment, {
-              x: xPos,
-              y,
-              size: 12,
-              font: segmentFont,
-              color: rgb(0, 0, 0),
-            });
-            
-            xPos += segmentFont.widthOfTextAtSize(cleanSegment, 12);
+          if (textWidth < width - margins.left - margins.right) {
+            currentLine = testLine;
+          } else {
+            lines.push(currentLine);
+            currentLine = word;
           }
         }
-      } else {
-        // Regular text without emphasis
-        currentPage.drawText(line, {
-          x: 50,
-          y,
-          size: 12,
-          font: font,
-          color: rgb(0, 0, 0),
-        });
+        if (currentLine) lines.push(currentLine);
+        
+        // Check if we need a new page before starting this paragraph
+        const paragraphHeight = lines.length * lineHeight;
+        if (y - paragraphHeight < 50) {
+          currentPage = pdfDoc.addPage([612, 792]);
+          y = height - 50;
+        }
+        
+        // Add the lines of this paragraph
+        for (const line of lines) {
+          currentPage.drawText(line, {
+            x: margins.left,
+            y,
+            size: 12,
+            font: font,
+            color: rgb(0, 0, 0),
+          });
+          
+          y -= lineHeight;
+        }
+        
+        // Add extra space after each paragraph
+        y -= paragraphSpacing;
       }
-      
-      y -= lineHeight;
     }
+    
+    // Save the PDF
+    const pdfBytes = await pdfDoc.save();
+    const pdfPath = `${outputDir}/${title.replace(/\s+/g, '_')}.pdf`;
+    await fs.writeFile(pdfPath, pdfBytes);
+    
+    console.log(`PDF saved as ${pdfPath}`);
+    return pdfPath;
+  } catch (error) {
+    console.error("Error creating PDF:", error);
+    throw error;
   }
-  
-  // Save the PDF
-  const pdfBytes = await pdfDoc.save();
-  const pdfPath = `${outputDir}/${title.replace(/\s+/g, '_')}.pdf`;
-  await fs.writeFile(pdfPath, pdfBytes);
-  
-  console.log(`PDF saved as ${pdfPath}`);
 }
 
 // Generate a specific title for the book
@@ -707,143 +729,155 @@ function extractTitle(outline) {
   return "Untitled Book";
 }
 
-// Main function
-async function main() {
+// Function to find all chapter files in a directory
+async function findChapterFiles(chaptersDir) {
   try {
-    // Process command line arguments
-    const args = process.argv.slice(2);
-    const genre = args[0] || '';
-    const topic = args[1] || '';
-    let requestedChapterCount = null;
-    let skipEnhancement = false;
+    const files = await fs.readdir(chaptersDir);
     
-    // Check for options in args
-    for (let i = 2; i < args.length; i++) {
-      // Check if argument is a number (chapter count)
-      if (!isNaN(parseInt(args[i]))) {
-        requestedChapterCount = parseInt(args[i]);
-        console.log(`User requested ${requestedChapterCount} chapters`);
-      }
-      // Check for skip enhancement flag
-      else if (args[i].toLowerCase() === '--no-enhance') {
-        skipEnhancement = true;
-        console.log('Chapter enhancement step will be skipped');
-      }
-    }
+    // Filter for chapter files
+    const chapterFiles = files
+      .filter(file => 
+        file.match(/chapter_\d+\.txt$/i) &&
+        !file.match(/enhanced\.txt$/i) // Exclude files with "enhanced" in the name
+      )
+      .sort((a, b) => {
+        // Extract chapter numbers and sort numerically
+        const numA = parseInt(a.match(/chapter_(\d+)\.txt/i)[1]);
+        const numB = parseInt(b.match(/chapter_(\d+)\.txt/i)[1]);
+        return numA - numB;
+      });
     
-    if (!genre) {
-      console.error('Error: Genre is required');
-      console.log('Usage: node main.js <genre> [topic] [chapterCount] [--no-enhance]');
-      console.log('Example: node main.js scifi "colonization of Mars" 12');
-      return;
-    }
-    
-    console.log(`Starting book generation process for ${genre} genre${topic ? ` with topic: ${topic}` : ''}`);
-    
-    // Create a temporary output directory for initial files
-    const tempDir = './output/temp_' + Date.now().toString(36);
-    await fs.mkdir(tempDir, { recursive: true });
-    
-    // Step 1: Generate or use topic
-    const bookConcept = topic || await generateBookConcept(genre, tempDir);
-    console.log("\nBook Concept:", bookConcept, "\n");
-    
-    // Step 1.5: Generate a specific title
-    const bookTitle = await generateBookTitle(genre, bookConcept);
-    console.log(`\nGenerated book title: "${bookTitle}"\n`);
-    
-    // Initialize directories with the book title
-    const outputDir = await initializeDirectories(bookTitle);
-    
-    // Save the book concept to the final directory
-    await fs.writeFile(`${outputDir}/book_concept.txt`, bookConcept);
-    
-    // Step 2: Develop detailed book outline
-    const bookOutline = await developBookOutline(genre, bookConcept, outputDir);
-    console.log("\nBook Outline Complete\n");
-    
-    // Step 3: Create character profiles
-    const characterProfiles = await createCharacterProfiles(genre, bookOutline, outputDir);
-    console.log("\nCharacter Profiles Complete\n");
-    
-    // Use generated title, fallback to extracting from outline if needed
-    const title = bookTitle || extractTitle(bookOutline);
-    // Save final title
-    await fs.writeFile(`${outputDir}/title.txt`, title);
-    
-    // Determine chapter count based on outline or user preference
-    let chapterCount = extractChapterCount(bookOutline);
-    
-    // Override with user-requested chapter count if specified
-    if (requestedChapterCount !== null) {
-      console.log(`Overriding detected chapter count (${chapterCount}) with user-requested count: ${requestedChapterCount}`);
-      chapterCount = requestedChapterCount;
-    }
-    
-    console.log(`Book title: ${title}`);
-    console.log(`Writing ${chapterCount} chapters\n`);
-    
-    // Step 4: Write each chapter and its summary
-    let chapterContents = [];
-    const chapterSummaries = [];
-    
-    for (let i = 1; i <= chapterCount; i++) {
-      // Prepare context for this chapter
-      const context = await prepareChapter(genre, i, bookOutline, characterProfiles, chapterSummaries, outputDir);
-      
-      // Write the chapter
-      const chapterContent = await writeChapter(genre, i, context, outputDir);
-      chapterContents.push(chapterContent);
-      
-      // Summarize the chapter for context in future chapters
-      const summary = await summarizeChapter(genre, i, chapterContent, outputDir);
-      chapterSummaries.push(`Chapter ${i}: ${summary}`);
-      
-      console.log(`\nCompleted Chapter ${i} of ${chapterCount}\n`);
-    }
-    
-    // Step 4.5: Enhance each chapter with additional content if not skipped
-    if (!skipEnhancement) {
-      console.log("\n===== Starting Chapter Enhancement Phase =====\n");
-      const enhancedChapterContents = [];
-      
-      for (let i = 1; i <= chapterCount; i++) {
-        // Enhance the chapter with additional details and depth
-        const enhancedChapter = await enhanceChapter(
-          genre, 
-          i, 
-          chapterContents[i-1], 
-          chapterSummaries, 
-          bookOutline,
-          outputDir
-        );
-        enhancedChapterContents.push(enhancedChapter);
-        
-        console.log(`\nEnhanced Chapter ${i} of ${chapterCount}\n`);
-      }
-      
-      // Use enhanced chapters for PDF
-      chapterContents = enhancedChapterContents;
-    }
-    
-    // Step 5: Create PDF
-    await createBookPDF(title, genre, chapterContents, outputDir);
-    
-    // Clean up temporary directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (error) {
-      console.error("Warning: Could not remove temporary directory:", error.message);
-    }
-    
-    console.log("\nBook generation complete!");
-    console.log(`Book saved as: ${outputDir}/${title.replace(/\s+/g, '_')}.pdf`);
-    console.log(`Individual chapters and other materials are available in the ${outputDir} directory`);
-    
+    return chapterFiles;
   } catch (error) {
-    console.error("An error occurred during book generation:", error);
+    console.error('Error finding chapter files:', error);
+    return [];
   }
 }
 
-// Run the program
+// Function to read chapter content
+async function readChapterContents(chaptersDir, chapterFiles) {
+  const chapters = [];
+  
+  for (const file of chapterFiles) {
+    try {
+      const content = await fs.readFile(path.join(chaptersDir, file), 'utf8');
+      chapters.push(content);
+    } catch (error) {
+      console.error(`Error reading chapter file ${file}:`, error);
+    }
+  }
+  
+  return chapters;
+}
+
+// Function to get book information from directory
+async function getBookInfoFromDirectory(bookDir) {
+  console.log(`Getting book information from ${bookDir}...`);
+  const bookInfo = {
+    title: '',
+    genre: '',
+    outline: '',
+    characterProfiles: ''
+  };
+  
+  try {
+    // Try to read the title file
+    if (await fileExists(path.join(bookDir, 'title.txt'))) {
+      bookInfo.title = (await fs.readFile(path.join(bookDir, 'title.txt'), 'utf8')).trim();
+    } else {
+      // If no title file, use directory name as title
+      bookInfo.title = path.basename(bookDir).replace(/_/g, ' ');
+    }
+    
+    // Try to read the outline
+    if (await fileExists(path.join(bookDir, 'book_outline.txt'))) {
+      bookInfo.outline = await fs.readFile(path.join(bookDir, 'book_outline.txt'), 'utf8');
+      
+      // Try to extract genre from outline if it exists
+      const genreMatch = bookInfo.outline.match(/genre:\s*([^\n.,]+)/i);
+      if (genreMatch && genreMatch[1]) {
+        bookInfo.genre = genreMatch[1].trim().toLowerCase();
+      }
+    }
+    
+    // Try to read character profiles
+    if (await fileExists(path.join(bookDir, 'character_profiles.txt'))) {
+      bookInfo.characterProfiles = await fs.readFile(path.join(bookDir, 'character_profiles.txt'), 'utf8');
+    }
+    
+    // If genre still not found, try to infer from book concept or use "fiction" as default
+    if (!bookInfo.genre && await fileExists(path.join(bookDir, 'book_concept.txt'))) {
+      const concept = await fs.readFile(path.join(bookDir, 'book_concept.txt'), 'utf8');
+      const conceptGenreMatch = concept.match(/genre:\s*([^\n.,]+)/i);
+      if (conceptGenreMatch && conceptGenreMatch[1]) {
+        bookInfo.genre = conceptGenreMatch[1].trim().toLowerCase();
+      } else {
+        bookInfo.genre = 'fiction';
+      }
+    } else if (!bookInfo.genre) {
+      bookInfo.genre = 'fiction';
+    }
+    
+    return bookInfo;
+  } catch (error) {
+    console.error(`Error getting book info from directory: ${error.message}`);
+    throw error;
+  }
+}
+
+// Main execution
+async function main() {
+  try {
+    const args = process.argv.slice(2);
+    
+    // Handle PDF generation
+    if (args[0] === '--pdf') {
+      const bookTitle = args[1];
+      if (!bookTitle) {
+        console.error('Please provide a book title for PDF generation');
+        process.exit(1);
+      }
+      
+      const bookDir = `./output/${bookTitle}`;
+      if (!await directoryExists(bookDir)) {
+        console.error(`Book directory not found: ${bookDir}`);
+        process.exit(1);
+      }
+      
+      // Get book info
+      const bookInfo = await getBookInfoFromDirectory(bookDir);
+      
+      // Get chapter files
+      const chaptersDir = path.join(bookDir, 'chapters');
+      const chapterFiles = (await fs.readdir(chaptersDir))
+        .filter(file => file.match(/^chapter_\d+\.txt$/))
+        .sort((a, b) => {
+          const numA = parseInt(a.match(/\d+/)[0]);
+          const numB = parseInt(b.match(/\d+/)[0]);
+          return numA - numB;
+        });
+      
+      if (chapterFiles.length === 0) {
+        console.error('No chapter files found');
+        process.exit(1);
+      }
+      
+      // Read chapters
+      const chapters = await readChapterContents(chaptersDir, chapterFiles);
+      
+      // Generate PDF
+      await createBookPDF(bookInfo.title, bookInfo.genre, chapters, bookDir);
+      return;
+    }
+    
+    // For all other operations, initialize Groq
+    initGroq();
+    
+    // Rest of the existing main function code...
+  } catch (error) {
+    console.error('Error in main execution:', error);
+    process.exit(1);
+  }
+}
+
 main();
