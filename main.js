@@ -186,7 +186,10 @@ async function developBookOutline(genre, concept, outputDir) {
       role: "system",
       content: `You are a professional ${genre} author and master of story structure.
       Your task is to develop a detailed outline for a ${genre} book based on the provided concept.
-      The book should be structured for approximately 300 pages with 10-15 chapters.`
+      The book should be structured for approximately 300 pages with 10-15 chapters.
+      IMPORTANT: Each chapter outline should be detailed enough to support writing a full 20-30 page chapter 
+      (5,000-7,500 words). Provide rich details about plot events, character development, and 
+      key scenes for each chapter. MAKE SURE IT'S NOT SHORTER!`
     },
     {
       role: "user",
@@ -196,11 +199,17 @@ async function developBookOutline(genre, concept, outputDir) {
       1. A refined title if necessary
       2. Main characters with brief descriptions (personality, motivations, arc)
       3. Setting details
-      4. A chapter-by-chapter breakdown with 1-2 paragraphs per chapter describing key events
+      4. A chapter-by-chapter breakdown. For EACH chapter provide 3-5 paragraphs describing:
+         - The main plot points and events
+         - Key character interactions and developments
+         - Important revelations or twists
+         - Setting and atmosphere
+         - Beginning and ending hooks
       5. Major plot points and themes
       6. Any special elements relevant to the ${genre} (e.g. technology for sci-fi, monsters for horror)
       
-      Aim for 10-15 chapters total for a 300-page book.`
+      Aim for 10-15 chapters total for a 300-page book. Remember each chapter needs to be developed enough 
+      to be written as a full 20-30 page chapter with rich detail.`
     }
   ];
   
@@ -214,6 +223,18 @@ async function developBookOutline(genre, concept, outputDir) {
 
 // Function to extract the number of chapters from the outline
 function extractChapterCount(outline) {
+  // First, check for explicit mention of total chapter count
+  const totalChaptersMatch = outline.match(/(\d+|ten|twelve|fifteen)\s+chapters/i);
+  if (totalChaptersMatch) {
+    const chapterCount = totalChaptersMatch[1].toLowerCase();
+    const numberMap = {
+      'ten': 10,
+      'twelve': 12,
+      'fifteen': 15
+    };
+    return numberMap[chapterCount] || parseInt(chapterCount);
+  }
+  
   // Look for patterns like "Chapter 1", "Chapter One", etc. to count chapters
   const chapterMatches = outline.match(/chapter\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)/gi);
   
@@ -221,7 +242,8 @@ function extractChapterCount(outline) {
     return new Set(chapterMatches.map(match => match.toLowerCase())).size;
   }
   
-  // Default to 10 chapters if we can't determine
+  // If we can't determine the number, default to 10 chapters
+  console.log("Could not determine chapter count from outline. Using default of 10 chapters.");
   return 10;
 }
 
@@ -327,14 +349,20 @@ async function writeChapter(genre, chapterNum, context, outputDir) {
     {
       role: "system",
       content: `You are a professional ${genre} author. Your task is to write Chapter ${chapterNum} of a book based on provided context.
-      Write in a compelling, engaging style appropriate for the ${genre} genre. Aim for approximately 20-30 pages of content 
-      (around 5,000-7,500 words). Include dialogue, description, action, and inner thoughts as appropriate.`
+      Write in a compelling, engaging style appropriate for the ${genre} genre. 
+      
+      IMPORTANT: This should be a complete, full-length chapter of approximately 20-30 pages (around 5,000-7,500 words).
+      Do NOT write a short summary or outline. The chapter should be publication-ready, detailed prose with rich description,
+      dialogue, character development, and plot advancement.
+      
+      Include dialogue, description, action, and inner thoughts as appropriate.`
     },
     {
       role: "user",
       content: `Using this context information: "${context.substring(0, 10000)}"
       
-      Write Chapter ${chapterNum} in full. This should be publication-ready prose, not an outline.
+      Write Chapter ${chapterNum} in full, detailed prose. This should be a complete chapter of approximately 20-30 pages (5,000-7,500 words), 
+      not a summary or outline. The chapter should read like it's from a published novel.
       
       - Maintain consistent characterization based on the profiles
       - Follow the plot points for this chapter from the outline
@@ -343,6 +371,8 @@ async function writeChapter(genre, chapterNum, context, outputDir) {
       - Include chapter title/number at the beginning
       - Write rich, immersive scenes with appropriate pacing
       - End the chapter with an appropriate hook or resolution
+      - Include detailed descriptions, meaningful dialogue, and character development
+      - Convey emotions and sensory details to make the story come alive
       
       Focus on quality prose that would engage readers of ${genre} fiction.`
     }
@@ -576,11 +606,18 @@ async function main() {
     const args = process.argv.slice(2);
     const genre = args[0] || '';
     const topic = args[1] || '';
+    let requestedChapterCount = null;
+    
+    // Check if a specific chapter count was requested
+    if (args.length > 2 && !isNaN(parseInt(args[2]))) {
+      requestedChapterCount = parseInt(args[2]);
+      console.log(`User requested ${requestedChapterCount} chapters`);
+    }
     
     if (!genre) {
       console.error('Error: Genre is required');
-      console.log('Usage: node main.js <genre> [topic]');
-      console.log('Example: node main.js scifi "colonization of Mars"');
+      console.log('Usage: node main.js <genre> [topic] [chapterCount]');
+      console.log('Example: node main.js scifi "colonization of Mars" 12');
       return;
     }
     
@@ -617,9 +654,17 @@ async function main() {
     // Save final title
     await fs.writeFile(`${outputDir}/title.txt`, title);
     
-    const chapterCount = extractChapterCount(bookOutline);
+    // Determine chapter count based on outline or user preference
+    let chapterCount = extractChapterCount(bookOutline);
+    
+    // Override with user-requested chapter count if specified
+    if (requestedChapterCount !== null) {
+      console.log(`Overriding detected chapter count (${chapterCount}) with user-requested count: ${requestedChapterCount}`);
+      chapterCount = requestedChapterCount;
+    }
+    
     console.log(`Book title: ${title}`);
-    console.log(`Detected ${chapterCount} chapters\n`);
+    console.log(`Writing ${chapterCount} chapters\n`);
     
     // Step 4: Write each chapter and its summary
     const chapterContents = [];
