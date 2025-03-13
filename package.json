@@ -1,0 +1,15 @@
+{
+  "name": "bad-writer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "groq-sdk": "^0.16.0",
+    "pdf-lib": "^1.17.1"
+  }
+}
