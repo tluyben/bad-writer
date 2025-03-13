@@ -189,7 +189,7 @@ async function developBookOutline(genre, concept, outputDir) {
       The book should be structured for approximately 300 pages with 10-15 chapters.
       IMPORTANT: Each chapter outline should be detailed enough to support writing a full 20-30 page chapter 
       (5,000-7,500 words). Provide rich details about plot events, character development, and 
-      key scenes for each chapter. MAKE SURE IT'S NOT SHORTER!`
+      key scenes for each chapter.`
     },
     {
       role: "user",
@@ -417,6 +417,70 @@ async function summarizeChapter(genre, chapterNum, chapterContent, outputDir) {
   return response;
 }
 
+// Function to expand and enhance a chapter
+async function enhanceChapter(genre, chapterNum, originalChapter, chapterSummaries, bookOutline, outputDir) {
+  console.log(`Enhancing Chapter ${chapterNum} with additional content and details...`);
+  
+  // Create context for enhancement, including the chapter summaries to maintain continuity
+  let summaryText = '';
+  if (chapterSummaries && chapterSummaries.length > 0) {
+    summaryText = chapterSummaries.join('\n\n');
+  }
+  
+  const prompt = [
+    {
+      role: "system",
+      content: `You are a professional ${genre} editor and author known for creating rich, immersive prose 
+      with compelling characterization and vivid description. Your task is to enhance and expand an existing 
+      chapter by adding more descriptive details, sensory information, character development, internal monologue, 
+      dialogue, and world-building elements.
+      
+      DO NOT rewrite the entire chapter or change the plot. Instead, you should:
+      1. Identify areas where description is sparse and add vivid sensory details
+      2. Expand dialogue scenes with more nuanced conversation and body language
+      3. Add internal thoughts and emotional reactions from characters
+      4. Enrich world-building elements and setting descriptions
+      5. Deepen character development through additional interactions or reflections
+      6. Ensure pacing is appropriate, expanding fast-moving scenes that need more development
+      7. Maintain the original author's voice and style while improving the chapter`
+    },
+    {
+      role: "user",
+      content: `I have a chapter from a ${genre} novel that needs enhancement. Please expand this chapter by 
+      adding more depth, detail, and richness while maintaining the original story structure and plot points. 
+      The chapter should grow by approximately 150-200% in length.
+      
+      Here is some context information to ensure continuity:
+      
+      BOOK OUTLINE EXCERPT:
+      ${bookOutline.substring(0, 2000)}...
+      
+      CHAPTER SUMMARIES:
+      ${summaryText}
+      
+      ORIGINAL CHAPTER ${chapterNum}:
+      ${originalChapter}
+      
+      Please enhance this chapter by adding more descriptive details, deeper character moments, 
+      expanded dialogue, internal thoughts, sensory information, and richer world-building. 
+      Do not change the major plot points or overall structure, but find places where the narrative 
+      could be enriched and expanded.`
+    }
+  ];
+  
+  const response = await callGroq(prompt);
+  
+  // Save the enhanced chapter
+  const enhancedChapterPath = `${outputDir}/chapters/chapter_${chapterNum}_enhanced.txt`;
+  await fs.writeFile(enhancedChapterPath, response);
+  
+  // Update the original chapter file with the enhanced version
+  await fs.writeFile(`${outputDir}/chapters/chapter_${chapterNum}.txt`, response);
+  
+  console.log(`Enhanced Chapter ${chapterNum} and saved to ${enhancedChapterPath}`);
+  return response;
+}
+
 // Function to create a formatted PDF from the book content
 async function createBookPDF(title, genre, chapters, outputDir) {
   console.log("Creating formatted PDF...");
@@ -427,6 +491,7 @@ async function createBookPDF(title, genre, chapters, outputDir) {
   // Embed the font
   const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
   const boldFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
   
   // Add title page
   const titlePage = pdfDoc.addPage([612, 792]); // US Letter size
@@ -462,9 +527,19 @@ async function createBookPDF(title, genre, chapters, outputDir) {
   
   // Add each chapter
   for (const [index, chapterContent] of chapters.entries()) {
+    // Extract chapter title if present
+    let chapterTitle = `Chapter ${index + 1}`;
+    const titleMatch = chapterContent.match(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n*]+)(?:\*\*)?/i);
+    if (titleMatch && titleMatch[1]) {
+      chapterTitle = `Chapter ${index + 1}: ${titleMatch[1].trim()}`;
+    }
+    
+    // Clean chapter content - remove markdown-style chapter headings
+    let cleanedContent = chapterContent.replace(/^\s*(?:\*\*)?Chapter\s+\d+(?:[:.]\s*|\s+)([^\n]+)(?:\*\*)?/i, '');
+    
     // Split chapter text into lines that fit the page width
     const lines = [];
-    const words = chapterContent.split(/\s+/);
+    const words = cleanedContent.split(/\s+/);
     let currentLine = '';
     
     for (const word of words) {
@@ -480,27 +555,27 @@ async function createBookPDF(title, genre, chapters, outputDir) {
     }
     if (currentLine) lines.push(currentLine);
     
-    // Process lines into pages
-    let page = pdfDoc.addPage([612, 792]);
-    let y = height - 50;
+    // Add chapter page
+    const chapterPage = pdfDoc.addPage([612, 792]);
+    let y = height - 150; // Start lower to leave room for chapter title
     const lineHeight = 15;
     
-    // Add chapter title at the top of the first page
-    const chapterTitle = `Chapter ${index + 1}`;
-    page.drawText(chapterTitle, {
-      x: 50,
-      y,
-      size: 18,
+    // Draw chapter title centered
+    chapterPage.drawText(chapterTitle, {
+      x: (width - boldFont.widthOfTextAtSize(chapterTitle, 24)) / 2,
+      y: height - 100,
+      size: 24,
       font: boldFont,
       color: rgb(0, 0, 0),
     });
     
-    y -= lineHeight * 2;
+    // Track page number for this chapter
+    let currentPage = chapterPage;
     
     // Add paragraph text
     for (const line of lines) {
       if (y < 50) {
-        page = pdfDoc.addPage([612, 792]);
+        currentPage = pdfDoc.addPage([612, 792]);
         y = height - 50;
       }
       
@@ -510,13 +585,46 @@ async function createBookPDF(title, genre, chapters, outputDir) {
         continue;
       }
       
-      page.drawText(line, {
-        x: 50,
-        y,
-        size: 12,
-        font: font,
-        color: rgb(0, 0, 0),
-      });
+      // Check for emphasized text with ** or *
+      if (line.includes('**') || line.includes('*')) {
+        // Handle text with emphasis marks
+        let xPos = 50;
+        const segments = line.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+        
+        for (const segment of segments) {
+          let segmentFont = font;
+          let cleanSegment = segment;
+          
+          if (segment.startsWith('**') && segment.endsWith('**')) {
+            segmentFont = boldFont;
+            cleanSegment = segment.substring(2, segment.length - 2);
+          } else if (segment.startsWith('*') && segment.endsWith('*')) {
+            segmentFont = italicFont;
+            cleanSegment = segment.substring(1, segment.length - 1);
+          }
+          
+          if (cleanSegment.length > 0) {
+            currentPage.drawText(cleanSegment, {
+              x: xPos,
+              y,
+              size: 12,
+              font: segmentFont,
+              color: rgb(0, 0, 0),
+            });
+            
+            xPos += segmentFont.widthOfTextAtSize(cleanSegment, 12);
+          }
+        }
+      } else {
+        // Regular text without emphasis
+        currentPage.drawText(line, {
+          x: 50,
+          y,
+          size: 12,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+      }
       
       y -= lineHeight;
     }
@@ -607,16 +715,25 @@ async function main() {
     const genre = args[0] || '';
     const topic = args[1] || '';
     let requestedChapterCount = null;
+    let skipEnhancement = false;
     
-    // Check if a specific chapter count was requested
-    if (args.length > 2 && !isNaN(parseInt(args[2]))) {
-      requestedChapterCount = parseInt(args[2]);
-      console.log(`User requested ${requestedChapterCount} chapters`);
+    // Check for options in args
+    for (let i = 2; i < args.length; i++) {
+      // Check if argument is a number (chapter count)
+      if (!isNaN(parseInt(args[i]))) {
+        requestedChapterCount = parseInt(args[i]);
+        console.log(`User requested ${requestedChapterCount} chapters`);
+      }
+      // Check for skip enhancement flag
+      else if (args[i].toLowerCase() === '--no-enhance') {
+        skipEnhancement = true;
+        console.log('Chapter enhancement step will be skipped');
+      }
     }
     
     if (!genre) {
       console.error('Error: Genre is required');
-      console.log('Usage: node main.js <genre> [topic] [chapterCount]');
+      console.log('Usage: node main.js <genre> [topic] [chapterCount] [--no-enhance]');
       console.log('Example: node main.js scifi "colonization of Mars" 12');
       return;
     }
@@ -667,7 +784,7 @@ async function main() {
     console.log(`Writing ${chapterCount} chapters\n`);
     
     // Step 4: Write each chapter and its summary
-    const chapterContents = [];
+    let chapterContents = [];
     const chapterSummaries = [];
     
     for (let i = 1; i <= chapterCount; i++) {
@@ -683,6 +800,30 @@ async function main() {
       chapterSummaries.push(`Chapter ${i}: ${summary}`);
       
       console.log(`\nCompleted Chapter ${i} of ${chapterCount}\n`);
+    }
+    
+    // Step 4.5: Enhance each chapter with additional content if not skipped
+    if (!skipEnhancement) {
+      console.log("\n===== Starting Chapter Enhancement Phase =====\n");
+      const enhancedChapterContents = [];
+      
+      for (let i = 1; i <= chapterCount; i++) {
+        // Enhance the chapter with additional details and depth
+        const enhancedChapter = await enhanceChapter(
+          genre, 
+          i, 
+          chapterContents[i-1], 
+          chapterSummaries, 
+          bookOutline,
+          outputDir
+        );
+        enhancedChapterContents.push(enhancedChapter);
+        
+        console.log(`\nEnhanced Chapter ${i} of ${chapterCount}\n`);
+      }
+      
+      // Use enhanced chapters for PDF
+      chapterContents = enhancedChapterContents;
     }
     
     // Step 5: Create PDF

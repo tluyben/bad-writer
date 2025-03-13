@@ -30,7 +30,7 @@ This project automates the creation of full-length books in various genres using
 
 Basic usage:
 ```bash
-node main.js <genre> [topic] [chapterCount]
+node main.js <genre> [topic] [chapterCount] [--no-enhance]
 ```
 
 Examples:
@@ -43,6 +43,9 @@ node main.js scifi "interstellar colonization"
 
 # Generate a horror book with exactly 15 chapters
 node main.js horror "haunted lighthouse" 15
+
+# Generate a thriller book without the enhancement phase
+node main.js thriller "cold case mystery" --no-enhance
 ```
 
 ## 📋 Process Steps
@@ -52,7 +55,8 @@ node main.js horror "haunted lighthouse" 15
 3. **Outline Development**: Builds a detailed chapter-by-chapter outline
 4. **Character Creation**: Develops in-depth character profiles
 5. **Chapter Writing**: Writes full-length chapters (20-30 pages each)
-6. **PDF Compilation**: Formats everything into a readable PDF
+6. **Chapter Enhancement**: Expands each chapter with additional details and depth
+7. **PDF Compilation**: Formats everything into a readable PDF
 
 ## 📊 Output Structure
 
@@ -67,7 +71,9 @@ output/
     ├── [book_title].pdf
     ├── chapters/
     │   ├── chapter_1.txt
+    │   ├── chapter_1_enhanced.txt
     │   ├── chapter_2.txt
+    │   ├── chapter_2_enhanced.txt
     │   └── ...
     └── summaries/
         ├── chapter_1_summary.txt
